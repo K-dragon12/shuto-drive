@@ -30,17 +30,30 @@ canvas.height = 480;
 const W = canvas.width, H = canvas.height;
 
 // ===== 3D ENGINE =====
-const HZ = Math.floor(H * 0.38);   // horizon Y
+const HZ = Math.floor(H * 0.36);
 const NEAR_Z  = 500;
-const FAR_Z   = 14000;
-const ROAD_HW = W * 0.44;           // road half-width at NEAR_Z
+const FAR_Z   = 16000;
+
+// 道を広くする。0.44 → 0.58
+const ROAD_HW = W * 0.58;
+
+// 5分前後遊べる距離
+const GAME_TOTAL_KM = 25.0;
+
+// 道路の端と車線中心を分ける
+// 前の LANE_WX = [-1.4, 0, 1.4] は外側レーンが端に寄りすぎてた
+const ROAD_EDGE_WX = 1.35;
+const LANE_WX = [-0.82, 0, 0.82];
+
+// 車線境界線。3車線なので区切りは2本
+const LANE_MARK_WX = [-0.41, 0.41];
 
 const sy  = z => HZ + (H - HZ) * NEAR_Z / Math.max(z, 1);
 const sx  = (wx, z) => W / 2 + wx * ROAD_HW * NEAR_Z / Math.max(z, 1);
 const rhw = z => ROAD_HW * NEAR_Z / Math.max(z, 1);
 
 let scrollZ = 0;
-const LANE_WX = [-1.4, 0, 1.4]; // world-x per lane
+let lastTime = performance.now();
 
 // ===== AUDIO =====
 let audioCtx=null,engineOsc=null,engineOsc2=null,engineGain=null,engineFilter=null;
@@ -136,7 +149,7 @@ let nitro={active:false,timer:0,cooldown:0};
 const getNitroDur=()=>NITRO_BASE_DUR+tuning.nitro*60;
 const getNitroCD =()=>NITRO_BASE_CD-tuning.nitro*120;
 function activateNitro(){
-  if(!state.running||nitro.active||nitro.cooldown>0||state.km>=14.8)return;
+  if(!state.running||nitro.active||nitro.cooldown>0||state.km>=GAME_TOTAL_KM)return;
   initAudio(); nitro.active=true; nitro.timer=getNitroDur(); nitro.cooldown=0;
   playNitroSound(); addLog('💨 ニトロ発動！ 爆速加速！','ev');
 }
@@ -160,10 +173,15 @@ let traffic=[], crashes=[], rainParticles=[], score=0;
 let state = {running:false,speed:0,km:0,carKey:'gtr',lane:1,targetLane:1,laneX:0,targetLaneX:0,frame:0,fired:new Set(),wet:false,slipX:0,_kmCoins:0};
 
 // ===== STAGES =====
-const stages=[
-  {name:'C1 都心環状',km:0},
-  {name:'湾岸線',    km:5},
-  {name:'箱崎JCT',  km:10},
+const events=[
+  {km:2.5, txt:'⚡ 谷町JCT通過！',cls:'ev'},
+  {km:8.0, txt:'🌊 湾岸線へ！ +10コイン',cls:'sp',reward:10},
+  {km:10.0, txt:'🌉 レインボーブリッジ — 最高の夜景...',cls:'sp'},
+  {km:13.5, txt:'🚔 覆面！ 全力逃走！',cls:'warn'},
+  {km:16.0,txt:'🌿 箱崎JCTへ！ +10コイン',cls:'sp',reward:10},
+  {km:19.0,txt:'🌧️ 雨！ スリッピーな路面',cls:'warn',setWet:true},
+  {km:23.0,txt:'🔥 ラストスパート！',cls:'warn'},
+  {km:GAME_TOTAL_KM,txt:'🏁 ゴール！ +80コイン 🔥',cls:'sp',reward:80},
 ];
 function getCurrentStage(){
   let s=stages[0];
@@ -266,77 +284,104 @@ function drawNightSky(){
 
 // ===== ROAD 3D =====
 function drawRoad3D(){
-  // Road strips (alternating for speed effect)
   const STRIP_Z = 700;
-  const TOTAL_Z = 12000;
+  const TOTAL_Z = 14000;
   const offset = scrollZ % STRIP_Z;
 
-  // Base road fill
+  // Road base
   ctx.fillStyle='#141420';
   ctx.beginPath();
-  ctx.moveTo(W/2-rhw(FAR_Z),HZ); ctx.lineTo(W/2+rhw(FAR_Z),HZ);
-  ctx.lineTo(W/2+ROAD_HW,H);    ctx.lineTo(W/2-ROAD_HW,H);
-  ctx.closePath(); ctx.fill();
+  ctx.moveTo(sx(-ROAD_EDGE_WX, FAR_Z), HZ);
+  ctx.lineTo(sx( ROAD_EDGE_WX, FAR_Z), HZ);
+  ctx.lineTo(sx( ROAD_EDGE_WX, NEAR_Z), H);
+  ctx.lineTo(sx(-ROAD_EDGE_WX, NEAR_Z), H);
+  ctx.closePath();
+  ctx.fill();
 
-  // Alternating strips
+  // Perspective strips
   for(let z=NEAR_Z; z<TOTAL_Z; z+=STRIP_Z){
     const sz=z+offset;
     const y0=sy(sz), y1=sy(sz+STRIP_Z);
-    const hw0=rhw(sz), hw1=rhw(sz+STRIP_Z);
     if(y0<HZ) continue;
+
     const isAlt=Math.floor(sz/STRIP_Z)%2===0;
-    ctx.fillStyle=isAlt?'#1a1a2c':'#161626';
+    ctx.fillStyle=isAlt?'#1b1b2f':'#151526';
+
     ctx.beginPath();
-    ctx.moveTo(W/2-hw0,y0); ctx.lineTo(W/2+hw0,y0);
-    ctx.lineTo(W/2+hw1,Math.max(y1,HZ)); ctx.lineTo(W/2-hw1,Math.max(y1,HZ));
-    ctx.closePath(); ctx.fill();
+    ctx.moveTo(sx(-ROAD_EDGE_WX, sz), y0);
+    ctx.lineTo(sx( ROAD_EDGE_WX, sz), y0);
+    ctx.lineTo(sx( ROAD_EDGE_WX, sz+STRIP_Z), Math.max(y1,HZ));
+    ctx.lineTo(sx(-ROAD_EDGE_WX, sz+STRIP_Z), Math.max(y1,HZ));
+    ctx.closePath();
+    ctx.fill();
   }
 
-  // Wet road sheen
+  // Wet road reflection
   if(state.wet){
     const sheen=ctx.createLinearGradient(0,HZ,0,H);
     sheen.addColorStop(0,'rgba(80,120,255,0)');
-    sheen.addColorStop(0.5,'rgba(80,120,255,0.06)');
+    sheen.addColorStop(0.5,'rgba(80,120,255,0.08)');
     sheen.addColorStop(1,'rgba(80,120,255,0)');
-    ctx.fillStyle=sheen; ctx.fillRect(0,HZ,W,H-HZ);
+    ctx.fillStyle=sheen;
+    ctx.fillRect(0,HZ,W,H-HZ);
   }
 
-  // Lane markings (yellow dashes)
-  const DASH_Z = 300, GAP_Z = 250, PATTERN = DASH_Z + GAP_Z;
-  [-0.47, 0.47].forEach(lx=>{
+  // Lane markings: 3車線なので区切り線は2本
+  const DASH_Z = 320;
+  const GAP_Z = 260;
+  const PATTERN = DASH_Z + GAP_Z;
+
+  LANE_MARK_WX.forEach(lx=>{
     for(let z=NEAR_Z; z<FAR_Z; z+=PATTERN){
       const sz=((z-scrollZ%PATTERN)+PATTERN)%FAR_Z+NEAR_Z;
-      const z0=sz, z1=sz+DASH_Z;
-      const y0=sy(z0), y1=sy(z1);
-      const x0=sx(lx,z0), x1=sx(lx,z1);
+      const z0=sz;
+      const z1=sz+DASH_Z;
+      const y0=sy(z0);
+      const y1=sy(z1);
       if(y0<HZ||y1>H) continue;
-      const lw=Math.max(1,rhw(z0)*0.012);
-      ctx.strokeStyle='rgba(255,220,50,0.75)'; ctx.lineWidth=lw;
-      ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
+
+      const x0=sx(lx,z0);
+      const x1=sx(lx,z1);
+      const lw=Math.max(1.2,rhw(z0)*0.01);
+
+      ctx.strokeStyle='rgba(255,230,80,0.82)';
+      ctx.lineWidth=lw;
+      ctx.beginPath();
+      ctx.moveTo(x0,y0);
+      ctx.lineTo(x1,y1);
+      ctx.stroke();
     }
   });
 
-  // Center divider (double white lines)
-  // White solid edge lines
-  [-1,1].forEach(side=>{
-    ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.lineWidth=3;
+  // Edge lines
+  [-ROAD_EDGE_WX, ROAD_EDGE_WX].forEach(edge=>{
+    ctx.strokeStyle='rgba(255,255,255,0.88)';
+    ctx.lineWidth=3;
     ctx.beginPath();
-    ctx.moveTo(sx(side*1.4,NEAR_Z), sy(NEAR_Z));
-    ctx.lineTo(sx(side*1.4,FAR_Z),  sy(FAR_Z));
+    ctx.moveTo(sx(edge,NEAR_Z), sy(NEAR_Z));
+    ctx.lineTo(sx(edge,FAR_Z),  sy(FAR_Z));
     ctx.stroke();
   });
 
   // Guardrails
   [-1,1].forEach(side=>{
-    const baseX=side*(ROAD_HW+10);
-    const topX=sx(side*1.55,FAR_Z);
-    const botX=W/2+baseX;
-    // Rail top
-    ctx.strokeStyle='rgba(180,200,255,0.35)'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.moveTo(topX,HZ+2); ctx.lineTo(botX,H); ctx.stroke();
-    // Rail reflection glow
-    ctx.strokeStyle='rgba(100,140,255,0.1)'; ctx.lineWidth=8;
-    ctx.beginPath(); ctx.moveTo(topX,HZ+2); ctx.lineTo(botX,H); ctx.stroke();
+    const edge = side * (ROAD_EDGE_WX + 0.12);
+    const topX=sx(edge,FAR_Z);
+    const botX=sx(edge,NEAR_Z);
+
+    ctx.strokeStyle='rgba(190,210,255,0.42)';
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(topX,HZ+2);
+    ctx.lineTo(botX,H);
+    ctx.stroke();
+
+    ctx.strokeStyle='rgba(100,140,255,0.12)';
+    ctx.lineWidth=8;
+    ctx.beginPath();
+    ctx.moveTo(topX,HZ+2);
+    ctx.lineTo(botX,H);
+    ctx.stroke();
   });
 }
 
@@ -426,321 +471,413 @@ function drawRain(){
 
 // ===== CAR DRAWINGS (REAR VIEW) =====
 
-// GT-R R35 NISMO (rear)
-function drawGTR_rear(cx, cy, sc, nitroOn){
-  ctx.save(); ctx.translate(cx, cy); ctx.scale(sc, sc);
-  const w=68, h=28;
+function drawCarShadow(w, h){
+  ctx.fillStyle='rgba(0,0,0,0.38)';
+  ctx.beginPath();
+  ctx.ellipse(0, h/2 + 10, w*0.48, 10, 0, 0, Math.PI*2);
+  ctx.fill();
+}
 
-  // Body
-  ctx.fillStyle='#d0d0d8';
-  ctx.beginPath(); ctx.roundRect(-w/2,-h/2,w,h,5); ctx.fill();
+function drawTailLights(points){
+  points.forEach(([x,y,w,h,type])=>{
+    ctx.fillStyle='rgba(255,20,35,0.95)';
+    ctx.beginPath();
 
-  // Roof
-  ctx.fillStyle='#b8b8c0';
-  ctx.beginPath(); ctx.roundRect(-w/2+8,-h/2-14,w-16,14,4); ctx.fill();
+    if(type==='circle'){
+      ctx.arc(x,y,w,0,Math.PI*2);
+    }else{
+      ctx.roundRect(x-w/2,y-h/2,w,h,3);
+    }
 
-  // NISMO diffuser (black, angular)
-  ctx.fillStyle='#111';
-  ctx.beginPath(); ctx.roundRect(-w/2,-h/2+h-8,w,10,2); ctx.fill();
-  // Diffuser fins
-  for(let i=0;i<5;i++){
-    ctx.fillStyle='#222';
-    ctx.fillRect(-w/2+8+i*10,-h/2+h-7,8,8);
-  }
+    ctx.fill();
 
-  // GT-R taillights (4 round - 2 each side)
-  [[-w/2+5,-h/2+5],[-w/2+5,-h/2+h-12],[w/2-14,-h/2+5],[w/2-14,-h/2+h-12]].forEach(([lx,ly])=>{
-    ctx.fillStyle='rgba(255,40,40,0.9)';
-    ctx.beginPath(); ctx.arc(lx+4,ly+4,6,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle='rgba(255,0,0,0.5)'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(lx+4,ly+4,8,0,Math.PI*2); ctx.stroke();
+    ctx.strokeStyle='rgba(255,40,40,0.35)';
+    ctx.lineWidth=4;
+    ctx.stroke();
   });
+}
 
-  // Rear wing
-  ctx.fillStyle='#1a1a1a';
-  ctx.beginPath(); ctx.roundRect(-w/2-6,-h/2-20,w+12,5,2); ctx.fill();
-  // Wing supports
-  [[-20,-h/2-20],[-20+40,-h/2-20]].forEach(([wx,wy])=>{
-    ctx.fillStyle='#222';
-    ctx.fillRect(wx,wy,8,20);
-  });
+function drawWheels(w,h,style='normal'){
+  [-1,1].forEach(side=>{
+    const x=side*(w/2-10);
+    const y=h/2+3;
 
-  // NISMO red stripe
-  ctx.fillStyle='#cc0000';
-  ctx.fillRect(-w/2,-h/2+h-9,w,2);
+    ctx.fillStyle='#08080a';
+    ctx.beginPath();
+    ctx.ellipse(x,y,10,13,0,0,Math.PI*2);
+    ctx.fill();
 
-  // Quad exhaust
-  [[-22,-h/2+h-1],[-14,-h/2+h-1],[14,-h/2+h-1],[22,-h/2+h-1]].forEach(([ex,ey])=>{
-    ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(ex,ey+3,4,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#555'; ctx.beginPath(); ctx.arc(ex,ey+3,2.5,0,Math.PI*2); ctx.fill();
-  });
+    ctx.strokeStyle=style==='red'?'#cc1111':'#8a8a8a';
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.ellipse(x,y,8,10,0,0,Math.PI*2);
+    ctx.stroke();
 
-  // GT-R badge
-  ctx.fillStyle='#fff'; ctx.font='bold 7px sans-serif'; ctx.textAlign='center';
-  ctx.fillText('GT-R',0,-h/2+h*0.55);
-  ctx.textAlign='left';
-
-  // Wheels
-  [-w/2+4, w/2-14].forEach(wx=>{
-    ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(wx+5,h/2+6,9,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle='#888'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(wx+5,h/2+6,9,0,Math.PI*2); ctx.stroke();
-    ctx.strokeStyle='#666'; ctx.lineWidth=1;
-    for(let a=0;a<5;a++){
+    ctx.strokeStyle='#777';
+    ctx.lineWidth=1;
+    for(let i=0;i<6;i++){
+      const a=i*Math.PI/3;
       ctx.beginPath();
-      ctx.moveTo(wx+5,h/2+6);
-      ctx.lineTo(wx+5+Math.cos(a*Math.PI*0.4)*7,h/2+6+Math.sin(a*Math.PI*0.4)*7);
+      ctx.moveTo(x,y);
+      ctx.lineTo(x+Math.cos(a)*7,y+Math.sin(a)*7);
       ctx.stroke();
     }
-    // Brake caliper (red)
-    ctx.fillStyle='#cc0000';
-    ctx.beginPath(); ctx.arc(wx+5,h/2+6,4,0,Math.PI); ctx.fill();
+  });
+}
+
+function drawNitroFlameSmall(cx, cy){
+  ctx.save();
+  const pulse = 1 + Math.sin(state.frame*0.45)*0.18;
+  const fl=34*pulse;
+
+  ['rgba(255,255,255,0.9)','rgba(255,240,80,0.85)','rgba(255,130,0,0.72)','rgba(255,40,0,0.55)'].forEach((col,i)=>{
+    ctx.fillStyle=col;
+    ctx.beginPath();
+    ctx.ellipse(cx-(i*7+fl*0.25), cy, fl*(1-i*0.16), 5-i*0.5, 0, 0, Math.PI*2);
+    ctx.fill();
   });
 
-  if(nitroOn) drawNitroFlameSmall(-w/2-10,0,sc);
   ctx.restore();
 }
 
-// Ferrari F8 Tributo (rear)
-function drawFerrari_rear(cx, cy, sc, nitroOn){
-  ctx.save(); ctx.translate(cx, cy); ctx.scale(sc, sc);
-  const w=72, h=24;
+// GT-R: 四灯テール、箱っぽいがスポーツ寄り
+function drawGTR_rear(cx, cy, sc, nitroOn){
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.scale(sc,sc);
 
-  // Body - Rosso Corsa
-  ctx.fillStyle='#cc1111';
-  ctx.beginPath(); ctx.roundRect(-w/2,-h/2,w,h,4); ctx.fill();
-  // Body highlight
-  ctx.fillStyle='#dd2222';
-  ctx.beginPath(); ctx.roundRect(-w/2+6,-h/2,w-12,h*0.4,3); ctx.fill();
+  const w=78, h=32;
+  drawCarShadow(w,h);
 
-  // Roof
-  ctx.fillStyle='#990000';
-  ctx.beginPath(); ctx.roundRect(-w/2+10,-h/2-12,w-20,12,3); ctx.fill();
+  // Main body
+  ctx.fillStyle='#cfd2d8';
+  ctx.beginPath();
+  ctx.roundRect(-w/2,-h/2,w,h,7);
+  ctx.fill();
 
-  // F8 signature round taillights
-  [[-w/2+7,0],[w/2-7,0]].forEach(([lx,ly])=>{
-    // Outer ring
-    ctx.fillStyle='rgba(200,0,0,0.9)';
-    ctx.beginPath(); ctx.arc(lx,ly,10,0,Math.PI*2); ctx.fill();
-    // Inner bright
-    ctx.fillStyle='rgba(255,100,100,0.9)';
-    ctx.beginPath(); ctx.arc(lx,ly,6,0,Math.PI*2); ctx.fill();
-    // Cross bars (Ferrari taillight design)
-    ctx.strokeStyle='rgba(0,0,0,0.5)'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.moveTo(lx-10,ly); ctx.lineTo(lx+10,ly); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(lx,ly-10); ctx.lineTo(lx,ly+10); ctx.stroke();
-    // Glow
-    ctx.strokeStyle='rgba(255,50,50,0.3)'; ctx.lineWidth=4;
-    ctx.beginPath(); ctx.arc(lx,ly,12,0,Math.PI*2); ctx.stroke();
+  // Rear glass / roof
+  ctx.fillStyle='#7d8795';
+  ctx.beginPath();
+  ctx.moveTo(-25,-h/2);
+  ctx.lineTo(-15,-h/2-17);
+  ctx.lineTo(15,-h/2-17);
+  ctx.lineTo(25,-h/2);
+  ctx.closePath();
+  ctx.fill();
+
+  // Body lower diffuser
+  ctx.fillStyle='#111217';
+  ctx.beginPath();
+  ctx.roundRect(-w/2+4,h/2-10,w-8,12,3);
+  ctx.fill();
+
+  // NISMO red accent
+  ctx.fillStyle='#d40000';
+  ctx.fillRect(-w/2+5,h/2-11,w-10,2);
+
+  // Four round tail lights
+  drawTailLights([
+    [-27,-2,5,5,'circle'],
+    [-17,-2,5,5,'circle'],
+    [17,-2,5,5,'circle'],
+    [27,-2,5,5,'circle'],
+  ]);
+
+  // Wing
+  ctx.fillStyle='#111';
+  ctx.beginPath();
+  ctx.roundRect(-w/2-5,-h/2-22,w+10,5,2);
+  ctx.fill();
+  ctx.fillRect(-25,-h/2-18,5,17);
+  ctx.fillRect(20,-h/2-18,5,17);
+
+  // Exhaust
+  [-22,-13,13,22].forEach(x=>{
+    ctx.fillStyle='#2b2b2f';
+    ctx.beginPath();
+    ctx.arc(x,h/2+1,4,0,Math.PI*2);
+    ctx.fill();
   });
 
-  // Rear diffuser
-  ctx.fillStyle='#1a0000';
-  ctx.beginPath(); ctx.roundRect(-w/2,-h/2+h-7,w,9,2); ctx.fill();
-
-  // Center exhaust (dual)
-  ctx.fillStyle='#222';
-  [[-8,h/2],[8,h/2]].forEach(([ex,ey])=>{
-    ctx.beginPath(); ctx.arc(ex,ey,5,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#444'; ctx.beginPath(); ctx.arc(ex,ey,3,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='rgba(255,120,0,0.3)'; ctx.beginPath(); ctx.arc(ex,ey,2,0,Math.PI*2); ctx.fill();
-  });
-
-  // Prancing horse badge
-  ctx.fillStyle='#ffd700'; ctx.font='10px sans-serif'; ctx.textAlign='center';
-  ctx.fillText('🐎',0,-h/2+h*0.45);
+  ctx.fillStyle='#fff';
+  ctx.font='bold 7px sans-serif';
+  ctx.textAlign='center';
+  ctx.fillText('GT-R',0,7);
   ctx.textAlign='left';
 
-  // Rear lip spoiler
-  ctx.fillStyle='#880000';
-  ctx.beginPath(); ctx.roundRect(-w/2-4,-h/2-3,w+8,4,2); ctx.fill();
+  drawWheels(w,h,'normal');
 
-  // Wheels
-  [-w/2+2, w/2-12].forEach(wx=>{
-    ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(wx+5,h/2+7,10,0,Math.PI*2); ctx.fill();
-    // Ferrari silver 5-spoke
-    ctx.strokeStyle='#aaa'; ctx.lineWidth=2;
-    for(let a=0;a<5;a++){
-      const angle=a*Math.PI*0.4-Math.PI/2;
-      ctx.beginPath(); ctx.moveTo(wx+5,h/2+7); ctx.lineTo(wx+5+Math.cos(angle)*8,h/2+7+Math.sin(angle)*8); ctx.stroke();
-    }
-    ctx.fillStyle='#cc0000'; ctx.beginPath(); ctx.arc(wx+5,h/2+7,4,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#ffd700'; ctx.font='5px sans-serif'; ctx.textAlign='center';
-    ctx.fillText('F',wx+5,h/2+9); ctx.textAlign='left';
-  });
+  if(nitroOn) drawNitroFlameSmall(-w/2-10, h/2-2);
 
-  if(nitroOn) drawNitroFlameSmall(-w/2-8,0,sc);
   ctx.restore();
 }
 
-// Lamborghini Veneno (rear)
-function drawVeneno_rear(cx, cy, sc, nitroOn){
-  ctx.save(); ctx.translate(cx, cy); ctx.scale(sc, sc);
-  const w=80, h=22;
+// Ferrari: 低く、横長、丸テール
+function drawFerrari_rear(cx, cy, sc, nitroOn){
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.scale(sc,sc);
 
-  // Body - very angular / titanium
-  ctx.fillStyle='#6a6a6a';
+  const w=86, h=28;
+  drawCarShadow(w,h);
+
+  // Low supercar shape
+  ctx.fillStyle='#cc1111';
   ctx.beginPath();
-  ctx.moveTo(-w/2, h/2);
-  ctx.lineTo(-w/2+4,-h/2);
-  ctx.lineTo(-w/2+20,-h/2-6);
-  ctx.lineTo(w/2-20,-h/2-6);
-  ctx.lineTo(w/2-4,-h/2);
-  ctx.lineTo(w/2, h/2);
-  ctx.closePath(); ctx.fill();
-  // Body highlight
-  ctx.fillStyle='#7a7a7a';
+  ctx.moveTo(-w/2,h/2);
+  ctx.lineTo(-w/2+6,-h/2+4);
+  ctx.lineTo(-w/2+24,-h/2-5);
+  ctx.lineTo(w/2-24,-h/2-5);
+  ctx.lineTo(w/2-6,-h/2+4);
+  ctx.lineTo(w/2,h/2);
+  ctx.closePath();
+  ctx.fill();
+
+  // Highlight
+  ctx.fillStyle='#f02a2a';
   ctx.beginPath();
-  ctx.moveTo(-w/2+10,-h/2-2);
-  ctx.lineTo(w/2-10,-h/2-2);
-  ctx.lineTo(w/2-16,-h/2-7);
-  ctx.lineTo(-w/2+16,-h/2-7);
-  ctx.closePath(); ctx.fill();
+  ctx.roundRect(-w/2+12,-h/2+1,w-24,9,4);
+  ctx.fill();
 
-  // Carbon fiber panels
-  ctx.fillStyle='#2a2a2a';
-  ctx.beginPath(); ctx.roundRect(-w/2+2,-h/2+2,20,h-4,2); ctx.fill();
-  ctx.beginPath(); ctx.roundRect(w/2-22,-h/2+2,20,h-4,2); ctx.fill();
+  // Rear window
+  ctx.fillStyle='#350909';
+  ctx.beginPath();
+  ctx.roundRect(-23,-h/2-11,46,12,4);
+  ctx.fill();
 
-  // Massive rear wing
-  ctx.fillStyle='#111';
-  ctx.beginPath(); ctx.roundRect(-w/2-10,-h/2-28,w+20,6,2); ctx.fill();
-  // Wing supports (angular)
-  [[-22,-h/2-22],[16,-h/2-22]].forEach(([wx,wy])=>{
-    ctx.fillStyle='#333';
+  // Diffuser
+  ctx.fillStyle='#160303';
+  ctx.beginPath();
+  ctx.roundRect(-w/2+5,h/2-9,w-10,11,3);
+  ctx.fill();
+
+  // Tail lights
+  drawTailLights([
+    [-31,0,7,7,'circle'],
+    [31,0,7,7,'circle'],
+  ]);
+
+  // Center exhaust
+  [-6,6].forEach(x=>{
+    ctx.fillStyle='#222';
     ctx.beginPath();
-    ctx.moveTo(wx,wy+22); ctx.lineTo(wx-4,wy); ctx.lineTo(wx+10,wy); ctx.lineTo(wx+8,wy+22);
-    ctx.closePath(); ctx.fill();
+    ctx.arc(x,h/2+1,5,0,Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle='#555';
+    ctx.beginPath();
+    ctx.arc(x,h/2+1,2.8,0,Math.PI*2);
+    ctx.fill();
   });
 
-  // Red accent stripes (signature Veneno feature)
-  ctx.fillStyle='#cc0000';
-  ctx.fillRect(-w/2,-h/2+h-5,w,3);
-  ctx.fillRect(-w/2,-h/2+h-12,w,2);
-  // Red on wheel arches
-  ctx.beginPath(); ctx.arc(-w/2+14,h/2+2,12,Math.PI,0); ctx.fillStyle='rgba(180,0,0,0.7)'; ctx.fill();
-  ctx.beginPath(); ctx.arc(w/2-14,h/2+2,12,Math.PI,0); ctx.fill();
+  ctx.fillStyle='#ffd700';
+  ctx.font='9px sans-serif';
+  ctx.textAlign='center';
+  ctx.fillText('🐎',0,5);
+  ctx.textAlign='left';
 
-  // Angular taillights (Y-shaped like real Veneno)
-  [[-w/2+6,0],[w/2-6,0]].forEach(([lx,ly])=>{
-    ctx.strokeStyle='rgba(255,30,30,0.9)'; ctx.lineWidth=3;
-    ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(lx,ly-8); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(lx-6,ly+5); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(lx+6,ly+5); ctx.stroke();
-    ctx.strokeStyle='rgba(255,50,50,0.3)'; ctx.lineWidth=6;
-    ctx.beginPath(); ctx.moveTo(lx,ly-8); ctx.lineTo(lx+6,ly+5); ctx.stroke();
+  drawWheels(w,h,'normal');
+
+  if(nitroOn) drawNitroFlameSmall(-w/2-8, h/2-2);
+
+  ctx.restore();
+}
+
+// Lamborghini: 角ばった低い車体、巨大ウィング
+function drawVeneno_rear(cx, cy, sc, nitroOn){
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.scale(sc,sc);
+
+  const w=92, h=27;
+  drawCarShadow(w,h);
+
+  // Angular body
+  ctx.fillStyle='#67686c';
+  ctx.beginPath();
+  ctx.moveTo(-w/2,h/2);
+  ctx.lineTo(-w/2+5,-h/2+2);
+  ctx.lineTo(-w/2+22,-h/2-9);
+  ctx.lineTo(w/2-22,-h/2-9);
+  ctx.lineTo(w/2-5,-h/2+2);
+  ctx.lineTo(w/2,h/2);
+  ctx.closePath();
+  ctx.fill();
+
+  // Black carbon sections
+  ctx.fillStyle='#191a1f';
+  ctx.beginPath();
+  ctx.moveTo(-w/2+7,h/2-2);
+  ctx.lineTo(-w/2+16,-h/2+1);
+  ctx.lineTo(-w/2+34,-h/2+1);
+  ctx.lineTo(-w/2+25,h/2-2);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(w/2-7,h/2-2);
+  ctx.lineTo(w/2-16,-h/2+1);
+  ctx.lineTo(w/2-34,-h/2+1);
+  ctx.lineTo(w/2-25,h/2-2);
+  ctx.closePath();
+  ctx.fill();
+
+  // Red accent
+  ctx.fillStyle='#d00000';
+  ctx.fillRect(-w/2+5,h/2-9,w-10,3);
+
+  // Massive wing
+  ctx.fillStyle='#09090b';
+  ctx.beginPath();
+  ctx.roundRect(-w/2-12,-h/2-28,w+24,6,2);
+  ctx.fill();
+
+  ctx.fillStyle='#24252b';
+  ctx.beginPath();
+  ctx.moveTo(-25,-h/2-23);
+  ctx.lineTo(-30,-h/2-2);
+  ctx.lineTo(-20,-h/2-2);
+  ctx.lineTo(-15,-h/2-23);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(25,-h/2-23);
+  ctx.lineTo(30,-h/2-2);
+  ctx.lineTo(20,-h/2-2);
+  ctx.lineTo(15,-h/2-23);
+  ctx.closePath();
+  ctx.fill();
+
+  // Y-like tail lights
+  ctx.strokeStyle='rgba(255,30,30,0.95)';
+  ctx.lineWidth=3;
+  [-1,1].forEach(side=>{
+    const x=side*31;
+    ctx.beginPath();
+    ctx.moveTo(x,0);
+    ctx.lineTo(x,-8);
+    ctx.moveTo(x,0);
+    ctx.lineTo(x-side*7,6);
+    ctx.moveTo(x,0);
+    ctx.lineTo(x+side*7,6);
+    ctx.stroke();
   });
 
   // Diffuser
-  ctx.fillStyle='#0a0a0a';
+  ctx.fillStyle='#070709';
   ctx.beginPath();
-  ctx.moveTo(-w/2,h/2); ctx.lineTo(w/2,h/2);
-  ctx.lineTo(w/2-8,h/2+10); ctx.lineTo(-w/2+8,h/2+10);
-  ctx.closePath(); ctx.fill();
-  // Diffuser fins
-  for(let i=0;i<6;i++){
-    ctx.fillStyle='#1a1a1a';
-    ctx.fillRect(-w/2+10+i*9,h/2,7,9);
-  }
+  ctx.moveTo(-w/2+8,h/2-3);
+  ctx.lineTo(w/2-8,h/2-3);
+  ctx.lineTo(w/2-18,h/2+9);
+  ctx.lineTo(-w/2+18,h/2+9);
+  ctx.closePath();
+  ctx.fill();
 
-  // Lamborghini hexagonal exhausts (6)
-  for(let i=0;i<6;i++){
-    const ex=-w/2+14+i*10;
-    ctx.fillStyle='#1a1a1a';
-    ctx.beginPath(); ctx.arc(ex,h/2+6,4,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle='#555'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.arc(ex,h/2+6,4,0,Math.PI*2); ctx.stroke();
-    ctx.fillStyle='rgba(255,100,0,0.2)';
-    ctx.beginPath(); ctx.arc(ex,h/2+6,2,0,Math.PI*2); ctx.fill();
-  }
-
-  // Rims (red-accent Pirelli)
-  [-w/2+2, w/2-16].forEach(wx=>{
-    ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(wx+8,h/2+2,11,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle='#888'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(wx+8,h/2+2,11,0,Math.PI*2); ctx.stroke();
-    // 10-spoke
-    for(let a=0;a<10;a++){
-      const angle=a*Math.PI*0.2;
-      ctx.strokeStyle='#777'; ctx.lineWidth=1.5;
-      ctx.beginPath(); ctx.moveTo(wx+8,h/2+2); ctx.lineTo(wx+8+Math.cos(angle)*9,h/2+2+Math.sin(angle)*9); ctx.stroke();
-    }
-    // Red rim accent
-    ctx.strokeStyle='#cc0000'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(wx+8,h/2+2,11,0,Math.PI*2); ctx.stroke();
-  });
-
-  // Lamborghini badge
-  ctx.fillStyle='#ffd700'; ctx.font='8px sans-serif'; ctx.textAlign='center';
-  ctx.fillText('𝝀',0,-h/2+h*0.3); ctx.textAlign='left';
-
-  if(nitroOn) drawNitroFlameSmall(-w/2-12,0,sc);
-  ctx.restore();
-}
-
-function drawNitroFlameSmall(cx, cy, sc){
-  ctx.save();
-  const fl=25+Math.random()*35;
-  ['#fff','#ffee66','#ff9900','#ff4400'].forEach((col,i)=>{
-    ctx.fillStyle=col;
-    ctx.globalAlpha=0.85-i*0.18;
+  // Exhaust cluster
+  for(let i=0;i<4;i++){
+    const x=-15+i*10;
+    ctx.fillStyle='#222';
     ctx.beginPath();
-    ctx.ellipse(cx-(i*5+Math.random()*8),cy,fl*(1-i*0.18),4-i*0.7,0,0,Math.PI*2);
+    ctx.arc(x,h/2+2,4,0,Math.PI*2);
     ctx.fill();
-  });
-  ctx.globalAlpha=1; ctx.restore();
+  }
+
+  ctx.fillStyle='#ffd700';
+  ctx.font='bold 8px sans-serif';
+  ctx.textAlign='center';
+  ctx.fillText('L',0,4);
+  ctx.textAlign='left';
+
+  drawWheels(w,h,'red');
+
+  if(nitroOn) drawNitroFlameSmall(-w/2-11, h/2-2);
+
+  ctx.restore();
 }
 
 // ===== PLAYER CAR DRAW =====
 function drawPlayerCar(){
-  const x = W/2 + state.laneX * ROAD_HW / 1.4;
-  const y = H - 60;
-  const sc = 1.6;
+  const x = sx(state.laneX, NEAR_Z);
+  const y = H - 62;
+  const sc = 1.65;
   const nitroOn = nitro.active;
-  if(state.carKey==='gtr')     drawGTR_rear(x,y,sc,nitroOn);
-  else if(state.carKey==='ferrari') drawFerrari_rear(x,y,sc,nitroOn);
-  else if(state.carKey==='veneno')  drawVeneno_rear(x,y,sc,nitroOn);
-}
 
+  if(state.carKey==='gtr') drawGTR_rear(x,y,sc,nitroOn);
+  else if(state.carKey==='ferrari') drawFerrari_rear(x,y,sc,nitroOn);
+  else if(state.carKey==='veneno') drawVeneno_rear(x,y,sc,nitroOn);
+}
 // ===== TRAFFIC 3D =====
 // Front-view traffic car (generic approaching car)
 function drawTrafficFront(cx, cy, scale, carKey, crashed){
-  ctx.save(); ctx.translate(cx, cy); ctx.scale(scale,scale);
-  if(crashed) ctx.rotate((Math.random()-0.5)*0.2);
-  const w=70, h=30;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+
+  if(crashed) ctx.rotate(Math.sin(state.frame*0.3)*0.18);
+
+  const w=82;
+  const h=34;
   const col  = carDefs[carKey]?.color || '#4488cc';
   const body = carDefs[carKey]?.body  || '#2255aa';
 
-  // Car body
+  // Shadow
+  ctx.fillStyle='rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(0,h/2+10,w*0.45,10,0,0,Math.PI*2);
+  ctx.fill();
+
+  // Front body
   ctx.fillStyle=body;
-  ctx.beginPath(); ctx.roundRect(-w/2,-h/2,w,h,5); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-w/2,h/2);
+  ctx.lineTo(-w/2+8,-h/2+5);
+  ctx.lineTo(-w/2+24,-h/2-4);
+  ctx.lineTo(w/2-24,-h/2-4);
+  ctx.lineTo(w/2-8,-h/2+5);
+  ctx.lineTo(w/2,h/2);
+  ctx.closePath();
+  ctx.fill();
+
+  // Hood
   ctx.fillStyle=col;
-  ctx.beginPath(); ctx.roundRect(-w/2+4,-h/2+4,w-8,h-8,3); ctx.fill();
+  ctx.beginPath();
+  ctx.roundRect(-w/2+10,-h/2+3,w-20,16,5);
+  ctx.fill();
 
   // Windshield
-  ctx.fillStyle='rgba(150,200,255,0.6)';
-  ctx.beginPath(); ctx.roundRect(-w/2+8,-h/2+4,w-16,h/2,3); ctx.fill();
+  ctx.fillStyle='rgba(130,190,255,0.55)';
+  ctx.beginPath();
+  ctx.roundRect(-24,-h/2-9,48,14,5);
+  ctx.fill();
 
-  // Headlights (bright)
-  [[-w/2+5,h/2-10],[w/2-14,h/2-10]].forEach(([lx,ly])=>{
-    ctx.fillStyle='rgba(255,240,200,0.95)';
-    ctx.beginPath(); ctx.ellipse(lx+5,ly+3,7,4,0,0,Math.PI*2); ctx.fill();
-    // Headlight glow
-    ctx.fillStyle='rgba(255,240,200,0.15)';
-    ctx.beginPath(); ctx.ellipse(lx+5,ly+3,16,8,0,0,Math.PI*2); ctx.fill();
+  // Headlights
+  [[-29,5],[29,5]].forEach(([x,y])=>{
+    ctx.fillStyle='rgba(255,245,205,0.96)';
+    ctx.beginPath();
+    ctx.ellipse(x,y,10,4,0,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle='rgba(255,240,180,0.20)';
+    ctx.beginPath();
+    ctx.ellipse(x,y+2,22,8,0,0,Math.PI*2);
+    ctx.fill();
   });
 
   // Grille
-  ctx.fillStyle='#111';
-  ctx.beginPath(); ctx.roundRect(-w/2+15,h/2-9,w-30,7,2); ctx.fill();
-  for(let i=0;i<4;i++){
-    ctx.strokeStyle='#333'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(-w/2+20+i*7,h/2-9); ctx.lineTo(-w/2+20+i*7,h/2-2); ctx.stroke();
-  }
+  ctx.fillStyle='#08080a';
+  ctx.beginPath();
+  ctx.roundRect(-18,h/2-12,36,8,3);
+  ctx.fill();
 
   // Wheels
-  [-w/2+4, w/2-14].forEach(wx=>{
-    ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(wx+5,h/2+8,8,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle='#666'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(wx+5,h/2+8,8,0,Math.PI*2); ctx.stroke();
+  [-1,1].forEach(side=>{
+    const x=side*(w/2-10);
+    ctx.fillStyle='#060608';
+    ctx.beginPath();
+    ctx.ellipse(x,h/2+3,10,12,0,0,Math.PI*2);
+    ctx.fill();
   });
+
   ctx.restore();
 }
 
@@ -780,19 +917,19 @@ function drawMinimap(){
   ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=1; ctx.beginPath(); ctx.roundRect(mx-5,my-5,mw+10,mh+10,8); ctx.stroke();
   const stageColors=['#4361ee','#06d6a0','#2dc653'];
   stages.forEach((sg,i)=>{
-    const endKm=i<stages.length-1?stages[i+1].km:14.8;
-    const x1=mx+(sg.km/14.8)*mw, x2=mx+(endKm/14.8)*mw;
+    const endKm=i<stages.length-1?stages[i+1].km:GAME_TOTAL_KM;
+    const x1=mx+(sg.km/GAME_TOTAL_KM)*mw, x2=mx+(endKm/GAME_TOTAL_KM)*mw;
     ctx.fillStyle=stageColors[i]; ctx.globalAlpha=0.45;
     ctx.fillRect(x1,my+mh/2-5,x2-x1,10); ctx.globalAlpha=1;
     ctx.fillStyle='rgba(255,255,255,0.45)'; ctx.font='8px sans-serif';
     ctx.fillText(sg.name,x1+2,my+mh/2-7);
   });
-  const px=mx+(state.km/14.8)*mw;
+  const px=mx+(state.km/GAME_TOTAL_KM)*mw;
   ctx.fillStyle='#ffd166';
   ctx.beginPath(); ctx.moveTo(px,my+mh/2-9); ctx.lineTo(px-4,my+mh/2+3); ctx.lineTo(px+4,my+mh/2+3); ctx.closePath(); ctx.fill();
   ctx.strokeStyle='#fff'; ctx.lineWidth=0.8; ctx.stroke();
   ctx.fillStyle='rgba(255,255,255,0.35)'; ctx.font='8px sans-serif';
-  ctx.fillText('0km',mx,my+mh+6); ctx.fillText('14.8km',mx+mw-26,my+mh+6);
+  ctx.fillText('0km',mx,my+mh+6); ctx.fillText(GAME_TOTAL_KM+'km',mx+mw-30,my+mh+6);
   ctx.globalAlpha=1;
 }
 
@@ -807,10 +944,10 @@ function drawHUD(){
   ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.beginPath(); ctx.roundRect(10,72,200,26,7); ctx.fill();
   ctx.fillStyle='#ffd166'; ctx.font='12px sans-serif'; ctx.fillText('🪙 '+coins+'   スコア: '+score,18,89);
   // Progress bar
-  const pct=state.km/14.8;
+  const pct=state.km/GAME_TOTAL_KM;
   ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.roundRect(W-170,10,155,14,4); ctx.fill();
   ctx.fillStyle='#4361ee'; ctx.beginPath(); ctx.roundRect(W-170,10,Math.max(0,155*pct),14,4); ctx.fill();
-  ctx.fillStyle='#fff'; ctx.font='10px sans-serif'; ctx.fillText('首都高  '+state.km.toFixed(1)+'/14.8km',W-165,21);
+  ctx.fillStyle='#fff'; ctx.font='10px sans-serif'; ctx.fillText('首都高  '+state.km.toFixed(1)+'/'+GAME_TOTAL_KM+'km',W-165,21);
   ctx.fillStyle='rgba(255,220,100,0.9)'; ctx.font='bold 10px sans-serif'; ctx.fillText('▶ '+getCurrentStage().name,W-165,36);
   // Nitro gauge
   const nx=W-170,ny=44,nw=155,nh=9;
@@ -926,12 +1063,11 @@ document.getElementById('tune-close').onclick=()=>document.getElementById('tune-
 document.getElementById('tune-overlay').addEventListener('click',e=>{if(e.target===e.currentTarget)e.currentTarget.classList.remove('open');});
 
 // ===== MAIN LOOP =====
-function loop(){
-  const car = getEffectiveCar(state.carKey);
-  const sg  = getCurrentStage();
-  document.getElementById('stage').textContent = sg.name;
+function loop(now = performance.now()){
+  const dt = Math.min(0.033, (now - lastTime) / 1000);
+  lastTime = now;
 
-  if(state.running && state.km < 14.8){
+  if(state.running && state.km < GAME_TOTAL_KM){
     // Nitro
     let spdBoost=1;
     if(nitro.active){
@@ -953,9 +1089,9 @@ function loop(){
     if(state.speed<effTop) state.speed=Math.min(effTop,state.speed+car.accel*(nitro.active?2.2:1));
     else if(state.speed>effTop) state.speed=Math.max(effTop,state.speed-car.accel*2);
 
-    state.km=Math.min(14.8,state.km+state.speed/3600*0.5);
+    state.km = Math.min(GAME_TOTAL_KM, state.km + (state.speed / 3600) * dt);
     state.frame++;
-    scrollZ+=state.speed*0.12;
+    scrollZ += state.speed * dt * 42;
 
     // Smooth lane transition
     state.targetLaneX = LANE_WX[state.targetLane] + state.slipX;
@@ -989,7 +1125,7 @@ function loop(){
       const dl=Math.abs(t.lane-state.targetLane);
       if(dz<150&&dl<0.6&&!t.crashed){
         t.crashed=true; t.crashTimer=90;
-        const sx2=sx(LANE_WX[Math.round(t.lane)],NEAR_Z*1.2);
+        const sx2 = sx(LANE_WX[safeLane], NEAR_Z*1.2);
         crashes.push({x:sx2,y:H-100,r:5,life:40,angle:Math.random()*Math.PI*2});
         playCrashSound(); score=Math.max(0,score-50);
         addLog('💥 '+carDefs[t.key].label+' クラッシュ！ -50pt','warn');
@@ -1017,7 +1153,7 @@ function loop(){
     document.getElementById('score').textContent=score;
     updateEngineSound(state.speed,car.topSpeed,nitro.active);
 
-  } else if(state.km>=14.8&&state.running){
+ } else if(state.km>=GAME_TOTAL_KM&&state.running){
     state.running=false; saveScore(score);
     document.getElementById('btn').textContent='スタート';
     addLog('🏆 フィニッシュ！ 最終スコア: '+score+'pt  🪙'+coins,'sp');
@@ -1046,7 +1182,7 @@ function loop(){
   const sortedTraffic=[...traffic].sort((a,b)=>b.z-a.z);
   sortedTraffic.forEach(t=>{
     if(t.z<NEAR_Z*0.4||t.z>FAR_Z*0.55) return;
-    const lx = LANE_WX[Math.round(Math.max(0,Math.min(2,t.lane)))];
+    const safeLane = Math.max(0, Math.min(2, Math.round(t.lane)));
     const tx = sx(lx, t.z);
     const ty = sy(t.z);
     const tscale = NEAR_Z / Math.max(t.z,1);
@@ -1070,7 +1206,7 @@ function loop(){
 // ===== BUTTON HANDLERS =====
 document.getElementById('btn').onclick=()=>{
   initAudio();
-  if(state.km>=14.8){reset();return;}
+  if(state.km>=GAME_TOTAL_KM){reset();return;}
   state.running=!state.running;
   document.getElementById('btn').textContent=state.running?'一時停止':'再開';
   if(state.running) addLog('🏎️ '+carDefs[state.carKey].label+' 発進！','ev');
@@ -1081,3 +1217,5 @@ document.getElementById('nitro-btn').onclick=activateNitro;
 
 document.getElementById('coins').textContent=coins;
 initDiscordSdk().finally(()=>loop());
+
+const sx2=sx(LANE_WX[Math.round(t.lane)],NEAR_Z*1.2);
