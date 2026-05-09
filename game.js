@@ -173,15 +173,11 @@ let traffic=[], crashes=[], rainParticles=[], score=0;
 let state = {running:false,speed:0,km:0,carKey:'gtr',lane:1,targetLane:1,laneX:0,targetLaneX:0,frame:0,fired:new Set(),wet:false,slipX:0,_kmCoins:0};
 
 // ===== STAGES =====
-const events=[
-  {km:2.5, txt:'⚡ 谷町JCT通過！',cls:'ev'},
-  {km:8.0, txt:'🌊 湾岸線へ！ +10コイン',cls:'sp',reward:10},
-  {km:10.0, txt:'🌉 レインボーブリッジ — 最高の夜景...',cls:'sp'},
-  {km:13.5, txt:'🚔 覆面！ 全力逃走！',cls:'warn'},
-  {km:16.0,txt:'🌿 箱崎JCTへ！ +10コイン',cls:'sp',reward:10},
-  {km:19.0,txt:'🌧️ 雨！ スリッピーな路面',cls:'warn',setWet:true},
-  {km:23.0,txt:'🔥 ラストスパート！',cls:'warn'},
-  {km:GAME_TOTAL_KM,txt:'🏁 ゴール！ +80コイン 🔥',cls:'sp',reward:80},
+const stages=[
+  {name:'C1 都心環状',km:0},
+  {name:'湾岸線',    km:8},
+  {name:'箱崎JCT',  km:16},
+  {name:'ゴール前',  km:22},
 ];
 function getCurrentStage(){
   let s=stages[0];
@@ -968,13 +964,14 @@ function drawHUD(){
 
 // ===== EVENTS =====
 const events=[
-  {km:1.5, txt:'⚡ 谷町JCT通過！',cls:'ev'},
-  {km:5.0, txt:'🌊 湾岸線へ！ +10コイン',cls:'sp',reward:10},
-  {km:6.0, txt:'🌉 レインボーブリッジ — 最高の夜景...',cls:'sp'},
-  {km:8.0, txt:'🚔 覆面！ 全力逃走！',cls:'warn'},
-  {km:10.0,txt:'🌿 箱崎JCTへ！ +10コイン',cls:'sp',reward:10},
-  {km:11.5,txt:'🌧️ 雨！ スリッピーな路面',cls:'warn',setWet:true},
-  {km:14.8,txt:'🏁 ゴール！ +80コイン 🔥',cls:'sp',reward:80},
+  {km:2.5, txt:'⚡ 谷町JCT通過！',cls:'ev'},
+  {km:8.0, txt:'🌊 湾岸線へ！ +10コイン',cls:'sp',reward:10},
+  {km:10.0, txt:'🌉 レインボーブリッジ — 最高の夜景...',cls:'sp'},
+  {km:13.5, txt:'🚔 覆面！ 全力逃走！',cls:'warn'},
+  {km:16.0,txt:'🌿 箱崎JCTへ！ +10コイン',cls:'sp',reward:10},
+  {km:19.0,txt:'🌧️ 雨！ スリッピーな路面',cls:'warn',setWet:true},
+  {km:23.0,txt:'🔥 ラストスパート！',cls:'warn'},
+  {km:GAME_TOTAL_KM,txt:'🏁 ゴール！ +80コイン 🔥',cls:'sp',reward:80},
 ];
 
 // ===== CONTROLS =====
@@ -1218,4 +1215,3 @@ document.getElementById('nitro-btn').onclick=activateNitro;
 document.getElementById('coins').textContent=coins;
 initDiscordSdk().finally(()=>loop());
 
-const sx2=sx(LANE_WX[Math.round(t.lane)],NEAR_Z*1.2);
