@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SHUTO RACER PRO</title>
+  <link rel="stylesheet" href="./shuto_racer_pro.css" />
+</head>
+<body>
+  <main class="game-shell">
+    <header class="topbar">
+      <div>
+        <h1>SHUTO RACER PRO</h1>
+        <p>首都高3レーン・タイムアタック</p>
+      </div>
+      <div class="top-actions">
+        <button id="pauseBtn" type="button">PAUSE</button>
+        <button id="resetBtn" type="button">RESET</button>
+      </div>
+    </header>
+
+    <section class="canvas-wrap">
+      <canvas id="game" width="1280" height="720"></canvas>
+      <div id="centerMessage" class="center-message">
+        <h2>SHUTO RACER PRO</h2>
+        <p>← → / A D：レーン移動　Space：ニトロ　Enter：スタート</p>
+        <button id="startBtn" type="button">START RUN</button>
+      </div>
+    </section>
+
+    <section class="hud-panel">
+      <div class="meter"><span>SPEED</span><strong id="speedText">0</strong><em>km/h</em></div>
+      <div class="meter"><span>DISTANCE</span><strong id="distanceText">0.0</strong><em>km</em></div>
+      <div class="meter"><span>TIME</span><strong id="timeText">00:00</strong><em></em></div>
+      <div class="meter"><span>SCORE</span><strong id="scoreText">0</strong><em>pt</em></div>
+      <div class="meter"><span>COINS</span><strong id="coinText">0</strong><em>枚</em></div>
+    </section>
+
+    <section class="controls">
+      <button id="leftBtn" type="button">← LEFT</button>
+      <button id="nitroBtn" type="button">NITRO</button>
+      <button id="rightBtn" type="button">RIGHT →</button>
+      <select id="carSelect" aria-label="車を選択">
+        <option value="r35">GT-R R35</option>
+        <option value="f8">Ferrari F8</option>
+        <option value="veneno">Veneno</option>
+      </select>
+    </section>
+
+    <section id="log" class="log">EnterかSTARTで首都高へ。</section>
+  </main>
+
+  <script src="./shuto_racer_pro.js"></script>
+</body>
+</html>
