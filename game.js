@@ -1073,6 +1073,9 @@ function loop(now = performance.now()){
     } else if(nitro.cooldown>0) nitro.cooldown--;
     updateNitroBtn();
 
+    // Car stats for this frame
+    const car = getEffectiveCar(state.carKey);
+
     // Rain physics
     let topMod=1;
     if(state.wet){
@@ -1122,6 +1125,7 @@ function loop(now = performance.now()){
       const dl=Math.abs(t.lane-state.targetLane);
       if(dz<150&&dl<0.6&&!t.crashed){
         t.crashed=true; t.crashTimer=90;
+        const safeLane = Math.max(0, Math.min(2, Math.round(state.targetLane)));
         const sx2 = sx(LANE_WX[safeLane], NEAR_Z*1.2);
         crashes.push({x:sx2,y:H-100,r:5,life:40,angle:Math.random()*Math.PI*2});
         playCrashSound(); score=Math.max(0,score-50);
@@ -1180,7 +1184,7 @@ function loop(now = performance.now()){
   sortedTraffic.forEach(t=>{
     if(t.z<NEAR_Z*0.4||t.z>FAR_Z*0.55) return;
     const safeLane = Math.max(0, Math.min(2, Math.round(t.lane)));
-    const tx = sx(lx, t.z);
+    const tx = sx(LANE_WX[safeLane], t.z);
     const ty = sy(t.z);
     const tscale = NEAR_Z / Math.max(t.z,1);
     if(ty<HZ||tscale<0.03) return;
