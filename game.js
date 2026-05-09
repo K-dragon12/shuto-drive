@@ -206,6 +206,28 @@ const roadSigns=[
   {z:10000,text:'箱崎JCT ↗'},
 ];
 
+
+// ===== REALISTIC SHUTO BACKGROUND BUILDINGS =====
+// 首都高の背景にあるビル群。zを持たせて、奥から手前に流れるように見せる。
+const shutoBuildings = Array.from({ length: 70 }, (_, i) => ({
+  z: NEAR_Z + Math.random() * (FAR_Z - NEAR_Z),
+  side: Math.random() < 0.5 ? -1 : 1,
+  wx: 1.75 + Math.random() * 1.25,
+  w: 0.16 + Math.random() * 0.22,
+  h: 90 + Math.random() * 260,
+  windowsSeed: Math.random() * 9999,
+  tone: Math.random()
+}));
+
+// 手前に流れる光の線。速度が出るほど首都高を走ってる感が出る。
+const speedStreaks = Array.from({ length: 34 }, () => ({
+  z: NEAR_Z + Math.random() * (FAR_Z - NEAR_Z),
+  side: Math.random() < 0.5 ? -1 : 1,
+  wx: 1.45 + Math.random() * 0.85,
+  len: 80 + Math.random() * 180,
+  alpha: 0.12 + Math.random() * 0.25
+}));
+
 // ===== BACKGROUND: NIGHT SKY =====
 function drawNightSky(){
   // Sky gradient
@@ -276,6 +298,104 @@ function drawNightSky(){
       ctx.beginPath(); ctx.arc(px,py,2,0,Math.PI*2); ctx.fill();
     }
   }
+}
+
+// ===== REALISTIC SHUTO 3D BACKGROUND =====
+function drawShutoRealBuildings(){
+  shutoBuildings.forEach(b => {
+    // 奥から手前へ流れる。停止中も少しだけ動かして背景が死なないようにする。
+    b.z -= state.running ? Math.max(18, state.speed * 0.62) : 0.7;
+
+    if (b.z < NEAR_Z * 0.7) {
+      b.z = FAR_Z + Math.random() * 4000;
+      b.side = Math.random() < 0.5 ? -1 : 1;
+      b.wx = 1.75 + Math.random() * 1.25;
+      b.w = 0.16 + Math.random() * 0.22;
+      b.h = 90 + Math.random() * 260;
+      b.windowsSeed = Math.random() * 9999;
+      b.tone = Math.random();
+    }
+
+    const x = sx(b.side * b.wx, b.z);
+    const y = sy(b.z);
+    const scale = NEAR_Z / Math.max(b.z, 1);
+
+    if (y < -80 || y > H + 160) return;
+
+    const bw = Math.max(8, b.w * ROAD_HW * scale * 2.4);
+    const bh = Math.max(20, b.h * scale);
+    const baseX = x - bw / 2;
+    const baseY = y - bh;
+
+    // 遠景ほど暗く、手前ほど存在感を出す。
+    const a = Math.min(0.92, 0.22 + scale * 3.5);
+    const shade = b.tone > 0.5 ? 28 : 18;
+
+    ctx.fillStyle = `rgba(${shade}, ${shade + 4}, ${shade + 16}, ${a})`;
+    ctx.fillRect(baseX, baseY, bw, bh);
+
+    // 建物の側面ハイライト。立体感用。
+    ctx.fillStyle = `rgba(80, 100, 140, ${0.10 + scale * 0.5})`;
+    ctx.fillRect(baseX + bw * 0.72, baseY, bw * 0.28, bh);
+
+    // 窓。ランダムだけどseed固定なのでチラつきにくい。
+    const cols = Math.max(2, Math.floor(bw / 8));
+    const rows = Math.max(3, Math.floor(bh / 12));
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const noise = Math.sin(b.windowsSeed + r * 5.17 + c * 9.31);
+        if (noise > 0.18) {
+          ctx.fillStyle = `rgba(255, 218, 135, ${0.25 + Math.min(scale * 2, 0.55)})`;
+          ctx.fillRect(
+            baseX + 3 + c * (bw / cols),
+            baseY + 5 + r * 11,
+            Math.max(2, bw / cols - 4),
+            3
+          );
+        }
+      }
+    }
+
+    // 手前のビルだけブラーっぽい縦線を入れてスピード感を追加。
+    if (scale > 0.18) {
+      ctx.strokeStyle = `rgba(180, 210, 255, ${0.08 + scale * 0.3})`;
+      ctx.lineWidth = Math.max(1, scale * 5);
+      ctx.beginPath();
+      ctx.moveTo(baseX + bw / 2, baseY);
+      ctx.lineTo(baseX + bw / 2 + b.side * 22 * scale, baseY + bh);
+      ctx.stroke();
+    }
+  });
+}
+
+function drawSpeedStreaks(){
+  if (!state.running) return;
+
+  speedStreaks.forEach(s => {
+    s.z -= Math.max(45, state.speed * 1.35);
+
+    if (s.z < NEAR_Z * 0.55) {
+      s.z = FAR_Z + Math.random() * 3000;
+      s.side = Math.random() < 0.5 ? -1 : 1;
+      s.wx = 1.45 + Math.random() * 0.85;
+      s.len = 80 + Math.random() * 180;
+      s.alpha = 0.12 + Math.random() * 0.25;
+    }
+
+    const x = sx(s.side * s.wx, s.z);
+    const y = sy(s.z);
+    const scale = NEAR_Z / Math.max(s.z, 1);
+
+    if (y < HZ || y > H) return;
+
+    ctx.strokeStyle = `rgba(210, 230, 255, ${s.alpha * Math.min(1, scale * 4)})`;
+    ctx.lineWidth = Math.max(1, scale * 5);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - s.side * s.len * scale, y + 32 * scale);
+    ctx.stroke();
+  });
 }
 
 // ===== ROAD 3D =====
@@ -1166,6 +1286,12 @@ function loop(now = performance.now()){
 
   // 1. Night sky + Tokyo skyline
   drawNightSky();
+
+  // 1.5 首都高のリアル建物背景：奥から手前に流れる
+  drawShutoRealBuildings();
+
+  // 1.6 手前へ流れる光の線：スピード感を演出
+  drawSpeedStreaks();
 
   // 2. Road
   drawRoad3D();
